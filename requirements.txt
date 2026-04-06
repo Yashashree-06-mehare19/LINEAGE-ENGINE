@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn==0.29.0
+pydantic>=2.9.0  # Update this line
+neo4j==5.19.0
+psycopg2==2.9.11
+sqlglot==23.12.2
+pytest==8.2.0
+testcontainers==4.4.0
+httpx==0.27.0
+python-dotenv==1.0.1
