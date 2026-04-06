@@ -1,0 +1,71 @@
+﻿
+=======================================================
+SECTION 1: POST /lineage/events (HTTP Integration)
+=======================================================
+
+[1] COMPLETE event ΓåÆ should return status: ok
+  Γ£à PASS: HTTP 200
+  Γ£à PASS: status: ok
+  Γ£à PASS: job name echoed
+  Γ£à PASS: run_id echoed
+
+[2] START event ΓåÆ should return status: skipped
+  Γ£à PASS: HTTP 200
+  Γ£à PASS: status: skipped
+
+[3] FAIL event ΓåÆ should return status: ok
+  Γ£à PASS: HTTP 200
+  Γ£à PASS: status: ok
+
+[4] Missing eventType ΓåÆ should return 422
+  Γ£à PASS: HTTP 422
+
+[5] Bad eventTime format ΓåÆ should return 422
+  Γ£à PASS: HTTP 422
+
+[6] No inputs or outputs ΓåÆ should still return ok
+  Γ£à PASS: HTTP 200
+  Γ£à PASS: status: ok
+
+[7] Health check ΓåÆ both databases still ok
+  Γ£à PASS: HTTP 200
+  Γ£à PASS: neo4j ok
+  Γ£à PASS: postgres ok
+
+=======================================================
+SECTION 2: SQL Parser (SQLGlot)
+=======================================================
+
+[A] INSERT INTO ... SELECT * FROM ...
+  Γ£à PASS: raw.orders is input
+  Γ£à PASS: clean.orders is output
+  Γ£à PASS: job name set
+  Γ£à PASS: orchestrator = sql_script
+
+[B] CTE alias should NOT appear as input table
+  Γ£à PASS: CTE not in inputs
+  Γ£à PASS: raw.orders in inputs
+
+[C] CREATE TABLE AS SELECT (Snowflake dialect)
+  Γ£à PASS: raw.orders is input
+  Γ£à PASS: clean.orders is output
+
+[D] JOIN ΓÇö both tables should be inputs
+  Γ£à PASS: clean.orders in inputs
+  Γ£à PASS: reporting.summary is output
+
+=======================================================
+SECTION 3: dbt manifest.json Parser
+=======================================================
+
+[E] dbt manifest parsing
+  Γ£à PASS: 2 events created (2 deps, 1 no-dep model skipped, 1 test skipped)
+  Γ£à PASS: dbt.clean_orders jobs
+  Γ£à PASS: inputs from depends_on
+  Γ£à PASS: outputs use schema prefix
+  Γ£à PASS: orchestrator = dbt
+
+=======================================================
+RESULTS: 30 passed, 0 failed
+All tests passed Γ£à
+=======================================================

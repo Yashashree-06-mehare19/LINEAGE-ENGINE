@@ -1,0 +1,76 @@
+﻿
+=======================================================
+TEST 1: Job node created in Neo4j
+=======================================================
+  [setup] Neo4j wiped
+  PASS: Job node exists
+  PASS: Job.owner = test-team
+  PASS: Job.orchestrator = airflow
+
+=======================================================
+TEST 2: Dataset nodes created in Neo4j
+=======================================================
+  PASS: 2 datasets exist
+  PASS: raw.orders in graph
+  PASS: clean.orders in graph
+  PASS: Dataset.namespace = postgres
+  PASS: Dataset.name = raw.orders
+
+=======================================================
+TEST 3: PRODUCES and CONSUMES edges created
+=======================================================
+  PASS: 1 PRODUCES edge
+  PASS: 1 CONSUMES edge
+  PASS: Job PRODUCES clean.orders
+  PASS: raw.orders CONSUMES Job
+
+=======================================================
+TEST 4: Run node and HAS_RUN edge
+=======================================================
+  PASS: Run node exists
+  PASS: Run.status = COMPLETE
+  PASS: Job HAS_RUN edge exists
+
+=======================================================
+TEST 5: PostgreSQL run_log audit entry
+=======================================================
+  PASS: 1 row in run_log
+  PASS: job_name correct
+  PASS: status = COMPLETE
+  PASS: input_datasets recorded
+  PASS: output_datasets recorded
+
+=======================================================
+TEST 6: Idempotency ΓÇö write same event twice
+=======================================================
+  [setup] Neo4j wiped
+  PASS: Exactly 1 Job node
+  PASS: Exactly 2 Dataset nodes
+  PASS: Exactly 1 Run node
+  PASS: Exactly 1 PRODUCES edge
+  PASS: Exactly 1 row in run_log (no duplicate)
+
+=======================================================
+TEST 7: PII tag propagates from input to output
+=======================================================
+  [setup] Neo4j wiped
+  PASS: 'pii' tag propagated to output
+  [setup] Neo4j wiped
+  PASS: No PII tag when input has no PII
+
+=======================================================
+TEST 8: Full end-to-end via POST /lineage/events
+=======================================================
+  [setup] Neo4j wiped
+  PASS: HTTP 200
+  PASS: status: ok
+  PASS: Job written to Neo4j via HTTP
+  PASS: raw.sales in Neo4j
+  PASS: clean.sales in Neo4j
+  PASS: Run in Postgres run_log
+  PASS: correct owner echoed
+
+=======================================================
+RESULTS: 34 passed  |  0 failed
+All Stage 3 tests passed!
+=======================================================

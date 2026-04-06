@@ -54,8 +54,30 @@ Test script: `scripts/test_stage2.py`
 
 ---
 
-## Stage 3 — Storage Layer ❌ NOT STARTED
-- `app/storage/graph_writer.py` — real write_event() with Neo4j + Postgres
+## Stage 3 — Storage Layer ✅ COMPLETE
+
+### What Was Built
+- `app/storage/graph_writer.py` — real write_event() replacing the stub
+  - `_write_graph(tx, event)` — all Neo4j writes in single transaction
+  - `_upsert_job()`, `_upsert_dataset()` — MERGE-based, safe to re-run
+  - `_create_produces_edge()`, `_create_consumes_edge()`, `_create_run()`, `_create_has_run_edge()`
+  - `_write_postgres()` — inserts to run_log, ON CONFLICT DO NOTHING, failure not raised
+  - `_propagate_pii_tags()` — 1-hop PII propagation at write time
+
+### All 34 Integration Tests PASSED
+- Job node created with correct properties
+- Dataset nodes (namespace, name, uri)
+- PRODUCES and CONSUMES edges with timestamps
+- Run node + HAS_RUN edge
+- PostgreSQL run_log all fields correct
+- Idempotency: write same event twice = 1 node each, 1 run_log row
+- PII propagation: pii input → output inherits pii tag
+- No-PII: clean input → output stays clean
+- Full end-to-end via HTTP: POST → Neo4j + Postgres verified
+
+Test script: `scripts/test_stage3.py`
+
+---
 
 ## Stage 4 — Query API ❌ NOT STARTED
 - `app/api/router.py` — GET upstream/downstream/runs endpoints

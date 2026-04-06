@@ -1,22 +1,28 @@
 # Active Context
 
 ## Current Focus
-Ready to begin Stage 3 — Storage Layer (real write_event() with Neo4j + Postgres).
+Ready to begin Stage 4 — Query API (GET /lineage/upstream, /downstream, /runs endpoints).
 
 ## Last Completed
-- Stage 2 fully built: pydantic_models, converter, router, sql_parser, dbt_parser, graph_writer stub
-- Memory bank created (all 6 core files)
-- Full integration test suite run — ALL 13 tests PASSED (exit code 0)
-  - HTTP: COMPLETE/FAIL → ok, START → skipped, bad payload → 422
-  - SQL parser: INSERT, CTE exclusion, CREATE TABLE AS, JOIN
-  - dbt parser: model events, skip non-models, schema prefix
-- Test script: `scripts/test_stage2.py`
+- Stage 3 fully implemented: real `write_event()` with Neo4j + Postgres writes
+- 34/34 Stage 3 tests PASSED (exit code 0):
+  - TEST 1: Job node created correctly in Neo4j
+  - TEST 2: Dataset nodes (namespace, name, uri properties)
+  - TEST 3: PRODUCES and CONSUMES edges with timestamps
+  - TEST 4: Run node + HAS_RUN edge
+  - TEST 5: PostgreSQL run_log audit entry (all 5 fields)
+  - TEST 6: Idempotency — writing same event twice = exactly 1 of each node
+  - TEST 7: PII tag propagation (pii input → output tagged; clean input → no tag)
+  - TEST 8: Full end-to-end HTTP → Neo4j + Postgres verified
+- Test script: `scripts/test_stage3.py`
 
 ## Immediate Next Steps
-1. Build Stage 3 — replace graph_writer.py stub with real Neo4j + Postgres writes
-2. Implement write_event(), _write_graph(), _write_postgres(), _propagate_pii_tags()
-3. Test with seed script (`scripts/test_write_event.py`)
-4. Verify Neo4j browser shows nodes and edges
+1. Build Stage 4 — Query API GET endpoints
+2. `app/api/cypher_queries.py` — Cypher traversal strings
+3. `app/api/pydantic_models.py` — LineageGraphResponse, RunsResponse
+4. `app/api/router.py` — GET /lineage/upstream/{id}, /downstream/{id}, /runs/{job_id}
+5. Mount api router in app/main.py
+6. Test with seed data already in Neo4j
 
 ## Active Decisions
 - `graph_writer.py` is a STUB — logs only. Stage 3 replaces this file entirely.
