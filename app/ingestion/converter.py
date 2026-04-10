@@ -4,10 +4,14 @@ from datetime import datetime, timezone
 
 
 def ol_dataset_to_ref(ds: OLDataset) -> DatasetRef:
+    # If namespace already contains "://" (e.g. "postgres://prod:5432"),
+    # join with "/" to avoid double "://" in the URI.
+    # Otherwise (e.g. namespace="airflow"), join with "://".
+    sep = "/" if "://" in ds.namespace else "://"
     return DatasetRef(
         namespace=ds.namespace,
         name=ds.name,
-        uri=f"{ds.namespace}://{ds.name}",
+        uri=f"{ds.namespace}{sep}{ds.name}",
         tags=[],
     )
 

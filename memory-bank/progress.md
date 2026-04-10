@@ -108,3 +108,15 @@ Test script: `scripts/test_stage3.py`
 - Neo4j constraints were applied manually — not automated on container start yet
 - run_log table uses TEXT for run_id (not UUID) — matches current write pattern
 - Airflow service in docker-compose.yml is defined but not tested
+## Stage 2 — Frontend Dashboard (React + Vite) ✅ COMPLETE
+
+### What Was Built
+- **Project Structure**: Scaffolded an isolated Vite+React app under `/frontend/` implementing Tailwind CSS for aesthetics (`glass-panel` utilities with dynamic dark-space theming).
+- **Network Interactions**: Built `src/api/lineageApi.js` utilizing `axios` for localized requests targeting FastApi ports properly unlocked with `CORSMiddleware`.
+- **Node Components**: Mapped React-Flow's interactive canvas leveraging `@dagrejs/dagre` graph logic guaranteeing uniform Left-to-Right layouting rendering. Distinct colors + icon identifiers given to distinct graph roles (`Dataset` nodes = Blue, `Jobs` = Orange). Tag arrays process automatically rendering contextual PII badges.
+- **UI Windows**: `NodeSidePanel.jsx` properties sliding drawer with interactive Graph mapping buttons alongside `RunsPanel.jsx` rendering direct API table listings with conditional status badges. 
+- **Application Stitching**: Stitched inside `App.jsx` passing `React Flow` components gracefully through stateful loading hooks and custom error UI overlays mapped backwards across `API` promises.
+
+### Verified Working
+- Ran `npm install` gracefully installing dependencies to package config.
+- Ran `npm run dev` starting up UI without any fatal execution failures in `React`.

@@ -1,18 +1,17 @@
 # Active Context
 
 ## Current Focus
-Project complete! All 4 stages—Architecture/Setup, Ingestion (Validation/Parsing), Storage (Neo4j/Postgres Writing), and Query API (Graph Traversals) are complete and tested.
+Stage 2 (Week 2 Dashboard) has been completely built. A brand-new Vite+React workspace has been scaffolded under `/frontend/`, featuring dynamic DAG graphs mapping the REST node paths from `FastAPI`. 
 
 ## Last Completed
-- Phase 4 fully executed! `router.py`, `pydantic_models.py`, `cypher_queries.py` written and integrated into `app/main.py`.
-- Solved a critical cypher logic bug from documentation that used `<-[:PRODUCES*1..{depth}]-(j)-[:PRODUCES*1..{depth}]->(...)` which evaluated siblings rather than upstream paths –– replaced with robust `Dataset-[:CONSUMES|PRODUCES]->` relationship paths.
-- Addressed FastAPI `url` decoding idiosyncrasies via URL escaping variables before invoking httpx.
-- Verified all endpoints using a seeded synthetic multi-hop graph! All endpoints functioned effectively and passed 25 out of 25 comprehensive test checks (depth constraints, not found detection, edge calculations).
+- Provisioned `React Flow` mapping with `dagre` LR traversals via Axios requests to `localhost:8000`.
+- Built custom components styled natively using `TailwindCSS` with dark-mode Glassmorphism arrays (glowy nodes, interactive popovers).
+- Implemented `SearchBar`, `LineageGraph`, `NodeSidePanel` and `RunsPanel`.
+- Verified API CORS handshaking effectively returning datasets (jobs, lineage links, runs, output pipelines).
 
 ## Immediate Next Steps
-The backend engine functions correctly in its entirety — available for further user reviews or to establish the frontend visualization tool.
-- Prepared `scripts/seed_dummy_data.py` to allow manual testing of Path A (OpenLineage REST API events).
-- Wrote educational documentation `docs/learning_lineage_testing.md` exploring how we simulate pipeline data without a real orchestrator.
+- Review frontend visualization with user at `http://localhost:5173`.
+- Address any further dynamic aesthetic changes!
 
 ## Active Decisions
 - A lineage "hop" (Dataset to Dataset) counts as `depth=1` from the API user's perspective, but internally the pipeline traverses `2` edges (from Dataset->Job->Dataset), ensuring queries calculate traversing depth correctly!

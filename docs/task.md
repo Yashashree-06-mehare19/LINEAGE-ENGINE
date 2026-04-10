@@ -1,0 +1,23 @@
+# Track: Stage 2 Dashboard Implementation
+
+- `[x]` 1. **Project Scaffolding**
+  - `[x]` Run `npm create vite@latest frontend -- --template react`
+  - `[x]` Install core dependencies: `reactflow`, `dagre`, `axios`, `lucide-react`
+  - `[x]` Install TailwindCSS and configure `tailwind.config.js`
+- `[x]` 2. **Design System & Styling**
+  - `[x]` Apply dark mode Glassmorphism tokens to `index.css`
+  - `[x]` Configure node-specific color palettes (Blue/Orange)
+- `[x]` 3. **API Integration**
+  - `[x]` Add `CORSMiddleware` to FastAPI `app/main.py`
+  - `[x]` Create `src/api/lineageApi.js` wrapper matching local endpoints
+- `[x]` 4. **Components (React Flow)**
+  - `[x]` Write `src/utils/graphLayout.js` for `dagre` LR calculations
+  - `[x]` Write `src/components/LineageGraph.jsx` drawing canvas
+  - `[x]` Write custom Node definitions and Styles
+- `[x]` 5. **UI & Panels**
+  - `[x]` Write `src/components/SearchBar.jsx` header
+  - `[x]` Write `src/components/NodeSidePanel.jsx` properties drawer
+  - `[x]` Write run logs execution UI
+- `[ ]` 6. **Assembly & Verification**
+  - `[ ]` Combine into `App.jsx`
+  - `[ ]` Test e2e React server fetching real DAG queries from Python server

@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply text-white font-sans antialiased m-0 p-0 overflow-hidden;
+    /* Rich cosmic dark background */
+    background: radial-gradient(circle at top right, #1a2235, #0b0f19 60%);
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-darkglass backdrop-blur-md border border-white/10 shadow-xl rounded-xl;
+  }
+}
+
+/* Custom scrollbar for better aesthetics */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* React Flow custom styling over dark mode */
+.react-flow__pane {
+  cursor: grab;
+}
+.react-flow__pane:active {
+  cursor: grabbing;
+}
+.react-flow__node {
+  /* Provide a default transition for our dynamic UI rule */
+  transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+.react-flow__edge-path {
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 2;
+  transition: stroke 0.2s, stroke-width 0.2s;
+}
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: rgba(255, 255, 255, 0.6);
+  stroke-width: 3;
+}
