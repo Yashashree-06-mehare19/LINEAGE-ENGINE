@@ -23,6 +23,11 @@ import threading
 import webbrowser
 from datetime import datetime, timezone
 
+# Fix Windows Unicode encoding for emojis
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import httpx
 
 # ── Import the active pipeline ────────────────────────────────────────────────
@@ -114,7 +119,7 @@ def simulate_live_pipeline():
     if not _wait_for_api(timeout_seconds=60):
         return
 
-    print(f"\n[SIMULATOR] 🚀 Starting live simulation of '{PIPELINE_NAME}' pipeline")
+    print(f"\n[SIMULATOR] >> Starting live simulation of '{PIPELINE_NAME}' pipeline")
     print(f"[SIMULATOR] {len(PIPELINE_JOBS)} jobs to emit | {EVENT_DELAY_SECONDS}s delay between each\n")
 
     for i, job in enumerate(PIPELINE_JOBS, start=1):
@@ -140,7 +145,7 @@ def simulate_live_pipeline():
 
 def main():
     print("\n" + "=" * 60)
-    print("🚀  Lineage Engine — Live Demo Orchestrator")
+    print("[>>]  Lineage Engine - Live Demo Orchestrator")
     print("=" * 60 + "\n")
 
     # 1. Databases
@@ -174,10 +179,10 @@ def main():
     sim_thread.start()
 
     print("\n" + "=" * 60)
-    print("✨  ALL SYSTEMS UP  ✨")
-    print(f"   Dashboard  → {FRONTEND_URL}")
-    print(f"   API Docs   → {API_BASE}/docs")
-    print(f"   Pipeline   → {PIPELINE_NAME}")
+    print("[OK] ALL SYSTEMS UP")
+    print(f"   Dashboard  -> {FRONTEND_URL}")
+    print(f"   API Docs   -> {API_BASE}/docs")
+    print(f"   Pipeline   -> {PIPELINE_NAME}")
     print("   Press Ctrl+C to stop.")
     print("=" * 60 + "\n")
 
