@@ -91,6 +91,6 @@ PIPELINE_JOBS = [
 
 # ── Default Search URI for the Dashboard ─────────────────────────────────────
 # This is what the "Try Demo" button in the React dashboard will search for.
-# It should be a final output dataset — something at the end of the DAG.
-DEFAULT_SEARCH_URI = f"{NAMESPACE}/customers"
-DEFAULT_SEARCH_DIRECTION = "upstream"
+# We use the raw input and search downstream so the user can watch the graph grow live!
+DEFAULT_SEARCH_URI = f"{NAMESPACE}/raw_customers"
+DEFAULT_SEARCH_DIRECTION = "downstream"

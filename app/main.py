@@ -1,4 +1,5 @@
 import os
+import socket
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,28 +25,29 @@ app.include_router(ingestion_router)
 app.include_router(query_router)
 
 
+def _tcp_probe(host: str, port: int, timeout: float = 2.0) -> bool:
+    """Check if a TCP port is accepting connections. Fast, non-blocking."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 @app.get("/health", tags=["system"])
 def health_check():
-    status = {"neo4j": "unknown", "postgres": "unknown"}
+    """
+    Lightweight health check using raw TCP probes.
+    Does NOT create DB driver sessions — avoids hangs and cache issues.
+    """
+    neo4j_ok = _tcp_probe("127.0.0.1", 7687)
+    postgres_ok = _tcp_probe("127.0.0.1", 5432)
 
-    try:
-        from app.db_client import get_neo4j_driver
-        driver = get_neo4j_driver()
-        with driver.session() as session:
-            session.run("RETURN 1")
-        status["neo4j"] = "ok"
-    except Exception as e:
-        status["neo4j"] = f"error: {str(e)}"
-
-    try:
-        from app.db_client import get_postgres_conn
-        conn = get_postgres_conn()
-        conn.close()
-        status["postgres"] = "ok"
-    except Exception as e:
-        status["postgres"] = f"error: {str(e)}"
-
-    all_ok = all(v == "ok" for v in status.values())
+    status = {
+        "neo4j": "ok" if neo4j_ok else "starting",
+        "postgres": "ok" if postgres_ok else "starting",
+    }
+    all_ok = neo4j_ok and postgres_ok
     return {
         "status": "healthy" if all_ok else "degraded",
         "services": status

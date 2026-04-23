@@ -7,12 +7,12 @@ const API = axios.create({
 });
 
 export const getUpstream = async (datasetUri, depth = 5) => {
-  const res = await API.get(`/lineage/upstream/${encodeURIComponent(datasetUri)}`, { params: { depth } });
+  const res = await API.get(`/lineage/upstream/${datasetUri}`, { params: { depth } });
   return res.data;
 };
 
 export const getDownstream = async (datasetUri, depth = 5) => {
-  const res = await API.get(`/lineage/downstream/${encodeURIComponent(datasetUri)}`, { params: { depth } });
+  const res = await API.get(`/lineage/downstream/${datasetUri}`, { params: { depth } });
   return res.data;
 };
 

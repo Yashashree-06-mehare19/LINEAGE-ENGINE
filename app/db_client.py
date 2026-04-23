@@ -9,11 +9,11 @@ def get_neo4j_driver():
     uri = os.environ["NEO4J_URI"]
     user = os.environ["NEO4J_USER"]
     password = os.environ["NEO4J_PASSWORD"]
-    driver = GraphDatabase.driver(uri, auth=(user, password))
+    driver = GraphDatabase.driver(uri, auth=(user, password), connection_timeout=3)
     driver.verify_connectivity()
     return driver
 
 
 def get_postgres_conn():
     dsn = os.environ["POSTGRES_DSN"]
-    return psycopg2.connect(dsn)
+    return psycopg2.connect(dsn, connect_timeout=3)

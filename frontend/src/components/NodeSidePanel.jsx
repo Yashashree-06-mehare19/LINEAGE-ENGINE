@@ -75,14 +75,14 @@ export const NodeSidePanel = ({ node, onClose, onExplore, onViewRuns }) => {
         {isDataset ? (
            <>
              <button 
-               onClick={() => onExplore(node.id, 'upstream')}
+               onClick={() => onExplore(data.uri, 'upstream')}
                className="w-full flex items-center justify-center gap-2 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-lg text-sm font-semibold transition-colors border border-blue-500/30"
              >
                <ExternalLink size={16} className="-scale-x-100" />
                Explore Upstream
              </button>
              <button 
-               onClick={() => onExplore(node.id, 'downstream')}
+               onClick={() => onExplore(data.uri, 'downstream')}
                className="w-full flex items-center justify-center gap-2 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 rounded-lg text-sm font-semibold transition-colors border border-indigo-500/30"
              >
                Explore Downstream

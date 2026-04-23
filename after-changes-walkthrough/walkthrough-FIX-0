@@ -1,0 +1,74 @@
+# Walkthrough: Fixing the Upstream/Downstream 404 Bug
+
+As requested, here is a breakdown of what we just learned and fixed regarding the `Upstream/Downstream` 404 issue in the Lineage Engine UI.
+
+## 1. What was the problem?
+
+When you ran the live demo and clicked on a Dataset node, the side panel popped up successfully. However, clicking **"Explore Upstream"** or **"Explore Downstream"** always resulted in an error (the graph disappeared or showed an error), and a `404 Not Found` response was seen in the backend logs.
+
+This meant the React UI was successfully making an HTTP request to FastAPI, but FastAPI couldn't find the dataset in Neo4j.
+
+## 2. The Solution & Root Cause Analysis
+
+There were actually **two** bugs stacked together causing this! 
+
+### Bug 1: Using the wrong identifier (`node.id` vs `uri`)
+
+**The Concept:** 
+When we map data from a database (like Neo4j) to a UI (like React Flow), nodes usually have two IDs:
+1. **The Database Internal ID:** In Neo4j, every node gets a system ID like `4:abc-123:0`. This is just for Neo4j's internal engine.
+2. **The Business ID:** Our system identifies datasets by their `uri` (e.g., `postgres://clean.orders`).
+
+**The Mistake:**
+In `NodeSidePanel.jsx`, the button was doing this:
+```javascript
+onClick={() => onExplore(node.id, 'upstream')}
+```
+This passed the internal `4:abc-123:0` ID to our API. Our backend looks up nodes by `uri`, so it searched for a dataset with a URI of `"4:abc-123:0"`. Naturally, it found nothing and returned a 404.
+
+**The Fix:**
+We changed it to use the exact business `uri` stored in the node's properties:
+```javascript
+onClick={() => onExplore(data.uri, 'upstream')}
+```
+
+### Bug 2: Double Encoding URIs in HTTP Requests
+
+**The Concept:**
+URLs cannot contain certain special characters (like spaces or `/`). If you want to send a URL parameter, standard practice is to use `encodeURIComponent()`. For example, `postgres://clean.orders` becomes `postgres%3A%2F%2Fclean.orders`.
+
+**The Mistake:**
+In `lineageApi.js`, we were being "good citizens" and encoding the URI before sending it to FastAPI:
+```javascript
+const res = await API.get(`/lineage/upstream/${encodeURIComponent(datasetUri)}`);
+```
+However, in our FastAPI backend (`router.py`), the route was defined as:
+```python
+@router.get("/upstream/{dataset_id:path}")
+```
+The `:path` suffix is a special FastAPI feature that tells it "this variable is a raw path, do NOT parse out slashes". Since FastAPI already expects raw paths here, it does *not* automatically decode `%3A` or `%2F`. 
+
+So, FastAPI literally received the string `"postgres%3A%2F%2Fclean.orders"`. It queried Neo4j for that exact mangled string, found nothing, and returned a 404.
+
+**The Fix:**
+We removed the `encodeURIComponent` wrapper entirely. FastAPI's `:path` parameter is smart enough to accept the raw slashes.
+```javascript
+const res = await API.get(`/lineage/upstream/${datasetUri}`);
+```
+
+## 3. How we tackled it
+
+1. **Audited the code vs. the architecture:** We traced the data flow from `NodeSidePanel.jsx` → `lineageApi.js` → `router.py` → `cypher_queries.py`.
+2. **Identified the mismatch:** Found the `node.id` mistake in the React component.
+3. **Identified the URL mismatch:** Found the `encodeURIComponent` mismatch with FastAPI's `:path` wildcard.
+4. **Deployed the 2-file fix (Fix-0):** Replaced the variables and ran a sanity check.
+
+## Next Steps
+
+Now that the core graph traversal is unbroken, you can test it:
+1. Run `python run_live_demo.py`
+2. Wait for the simulator to complete a few jobs
+3. Click any Dataset node (Blue) and click "Explore Upstream"
+4. The graph will instantly filter down to only the ancestry of that node!
+
+Whenever you are ready to proceed with the remaining stages (like auto-applying constraints in Stage 6, or building the Impact Analysis endpoint in Stage 7), just let me know!
