@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
-from app.api.pydantic_models import LineageGraphResponse, RunsResponse, NodeModel, EdgeModel, RunRecord, DatasetsResponse, GlobalRunsResponse, DatasetRecord
+from app.api.pydantic_models import LineageGraphResponse, RunsResponse, NodeModel, EdgeModel, RunRecord, DatasetsResponse, GlobalRunsResponse, DatasetRecord, ImpactResponse
 from app.db_client import get_neo4j_driver, get_postgres_conn
 import logging
 
@@ -128,6 +128,51 @@ def get_downstream(
         edges=all_edges,
         node_count=len(all_nodes),
         edge_count=len(all_edges),
+    )
+
+
+@router.get("/impact/{dataset_id:path}", response_model=ImpactResponse)
+def get_impact(dataset_id: str):
+    """
+    Returns an impact analysis of changing this dataset.
+    Finds all downstream jobs and datasets that depend on it transitively.
+    """
+    driver = get_neo4j_driver()
+    with driver.session() as session:
+        exists = session.run(
+            "MATCH (d:Dataset {uri: $uri}) RETURN d.uri LIMIT 1",
+            uri=dataset_id
+        ).single()
+        if not exists:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {dataset_id}")
+
+        result = session.run(
+            """
+            MATCH path = (start:Dataset {uri: $uri})-[:CONSUMES|PRODUCES*1..20]->(node)
+            WHERE node:Dataset OR node:Job
+            RETURN DISTINCT node
+            """,
+            uri=dataset_id,
+        )
+
+        affected_jobs = []
+        affected_datasets = []
+
+        for record in result:
+            node = record["node"]
+            label = list(node.labels)[0] if node.labels else "Unknown"
+            if label == "Job":
+                affected_jobs.append(node["name"])
+            elif label == "Dataset":
+                affected_datasets.append(node["uri"])
+
+        impact_score = len(affected_jobs) + len(affected_datasets)
+
+    return ImpactResponse(
+        dataset_uri=dataset_id,
+        affected_jobs=affected_jobs,
+        affected_datasets=affected_datasets,
+        impact_score=impact_score
     )
 
 

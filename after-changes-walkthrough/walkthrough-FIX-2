@@ -1,0 +1,48 @@
+# Walkthrough: Stage 7 - Impact Analysis Endpoint
+
+As requested, here is a breakdown of what was implemented to build the new Impact Analysis endpoint.
+
+## 1. What was the problem?
+
+One of the killer features missing from the Lineage Engine was the ability to proactively ask: "If I change the schema of this specific dataset, what downstream jobs and datasets will break?"
+We needed a dedicated API endpoint that could calculate this impact dynamically by walking the Neo4j graph.
+
+## 2. The Solution & Root Cause Analysis
+
+To implement this, we created a new GET endpoint that takes a dataset URI, traverses the lineage graph forward through all `PRODUCES` and `CONSUMES` relationships, and tallies up the affected downstream components.
+
+### The Fix:
+
+We tackled this by extending the FastAPI application and the Pydantic data models.
+
+#### Change 1: Creating the Data Schema (`pydantic_models.py`)
+In `app/api/pydantic_models.py`, we created a new `ImpactResponse` schema. This defines the exact JSON structure the frontend (or an API consumer) will receive:
+- `dataset_uri`: The dataset being queried.
+- `affected_jobs`: A list of job names that will be impacted.
+- `affected_datasets`: A list of downstream dataset URIs that depend on the data.
+- `impact_score`: A simple severity score representing the total number of affected components (jobs + datasets).
+
+#### Change 2: Building the Cypher Query Endpoint (`router.py`)
+In `app/api/router.py`, we added the new `@router.get("/impact/{dataset_id:path}")` endpoint. 
+When called, it:
+1. Verifies the dataset exists in Neo4j (returns 404 if not).
+2. Executes a Neo4j Cypher traversal: `MATCH path = (start:Dataset {uri: $uri})-[:CONSUMES|PRODUCES*1..20]->(node)`
+3. Filters and separates the resulting downstream nodes into Jobs and Datasets.
+4. Calculates the `impact_score` and returns the `ImpactResponse`.
+
+#### Change 3: Adding Integration Tests (`test_stage7.py`)
+We also added `scripts/test_stage7.py` to ensure the endpoint works correctly against a seeded dummy graph, verifying that only downstream nodes are returned and independent pipelines are ignored.
+
+## 3. How we tackled it
+
+1.  **Modified `app/api/pydantic_models.py`**: Added the `ImpactResponse` model.
+2.  **Modified `app/api/router.py`**: Imported the model and implemented the `/impact/` route logic.
+3.  **Created `scripts/test_stage7.py`**: Built a new integration test script to lock in the correctness of the endpoint.
+
+## Next Steps
+
+Now you have a powerful backend API to power the Impact Analysis feature!
+- You can test it locally by starting the server and hitting `http://localhost:8000/docs` (Swagger UI) to try the `/lineage/impact/` endpoint.
+- The frontend team can now build a UI view that calls this endpoint to warn users before they make destructive schema changes.
+
+Whenever you are ready to proceed with the next stage, such as **Stage 8 (Multi-Hop Retroactive PII Propagation)**, let me know!

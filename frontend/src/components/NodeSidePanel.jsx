@@ -1,11 +1,34 @@
-import React from 'react';
-import { X, ExternalLink, Box, Activity, Database, Key } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, ExternalLink, Box, Activity, Database, Key, AlertTriangle, Loader2 } from 'lucide-react';
+import { getImpact } from '../api/lineageApi';
 
 export const NodeSidePanel = ({ node, onClose, onExplore, onViewRuns }) => {
+  const [impactData, setImpactData] = useState(null);
+  const [loadingImpact, setLoadingImpact] = useState(false);
+
+  // Reset impact data when the node changes
+  useEffect(() => {
+    setImpactData(null);
+    setLoadingImpact(false);
+  }, [node]);
+
   if (!node) return null;
 
   const isDataset = node.label === 'Dataset';
   const data = node.properties || {};
+
+  const handleCalculateImpact = async () => {
+    setLoadingImpact(true);
+    try {
+      const result = await getImpact(data.uri);
+      setImpactData(result);
+    } catch (e) {
+      console.error("Failed to calculate impact", e);
+      setImpactData({ error: "Failed to calculate impact. Ensure backend is running." });
+    } finally {
+      setLoadingImpact(false);
+    }
+  };
 
   return (
     <div className="absolute top-4 left-4 z-50 w-80 max-h-[90vh] glass-panel shadow-2xl flex flex-col text-white transform transition-transform duration-300">
@@ -66,6 +89,59 @@ export const NodeSidePanel = ({ node, onClose, onExplore, onViewRuns }) => {
               })}
             </div>
           </div>
+
+          {/* Impact Analysis Section */}
+          {isDataset && (
+            <div>
+              <h3 className="text-[10px] uppercase font-bold text-gray-500 tracking-wider mb-2 flex items-center gap-1">
+                <AlertTriangle size={14} /> Impact Analysis
+              </h3>
+              {!impactData && !loadingImpact && (
+                <button 
+                  onClick={handleCalculateImpact}
+                  className="w-full flex items-center justify-center gap-2 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded text-xs font-semibold transition-colors border border-red-500/30"
+                >
+                  Calculate Downstream Impact
+                </button>
+              )}
+              
+              {loadingImpact && (
+                <div className="flex items-center justify-center p-3 text-red-300/70 text-xs gap-2">
+                  <Loader2 size={14} className="animate-spin" /> Calculating...
+                </div>
+              )}
+
+              {impactData && !impactData.error && (
+                <div className="bg-red-950/40 p-3 rounded-lg border border-red-500/20 space-y-2">
+                  <div className="text-xs text-red-200 flex justify-between items-center border-b border-red-500/20 pb-1 mb-2">
+                    <span className="font-bold uppercase tracking-wider">Impact Score</span>
+                    <span className="bg-red-500 text-white font-bold px-2 py-0.5 rounded-full">{impactData.impact_score}</span>
+                  </div>
+                  
+                  {impactData.impact_score === 0 ? (
+                    <div className="text-xs text-green-400 font-medium">Safe to change! No downstream dependencies.</div>
+                  ) : (
+                    <>
+                      <div>
+                        <div className="text-[10px] uppercase text-red-300/70 font-semibold mb-1">Affected Jobs ({impactData.affected_jobs?.length || 0})</div>
+                        <div className="text-xs font-mono text-red-200 truncate">{impactData.affected_jobs?.join(', ') || 'None'}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase text-red-300/70 font-semibold mb-1">Affected Datasets ({impactData.affected_datasets?.length || 0})</div>
+                        <div className="text-xs font-mono text-red-200 truncate">{impactData.affected_datasets?.map(u => u.split('//').pop()).join(', ') || 'None'}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              
+              {impactData?.error && (
+                <div className="text-xs text-red-400 p-2 bg-red-900/30 rounded border border-red-500/30">
+                  {impactData.error}
+                </div>
+              )}
+            </div>
+          )}
 
         </div>
       </div>

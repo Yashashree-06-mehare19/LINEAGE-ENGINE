@@ -58,3 +58,9 @@ class DatasetsResponse(BaseModel):
 class GlobalRunsResponse(BaseModel):
     run_count: int
     runs: list[RunRecord]
+
+class ImpactResponse(BaseModel):
+    dataset_uri: str
+    affected_jobs: list[str]
+    affected_datasets: list[str]
+    impact_score: int
