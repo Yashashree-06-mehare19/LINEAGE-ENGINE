@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { X, ExternalLink, Box, Activity, Database, Key, AlertTriangle, Loader2 } from 'lucide-react';
+import { X, ExternalLink, Box, Activity, Database, Key, AlertTriangle, Loader2, Columns } from 'lucide-react';
 import { getImpact } from '../api/lineageApi';
+import { ColumnPanel } from './ColumnPanel';
 
 export const NodeSidePanel = ({ node, onClose, onExplore, onViewRuns }) => {
-  const [impactData, setImpactData] = useState(null);
+  const [impactData, setImpactData]   = useState(null);
   const [loadingImpact, setLoadingImpact] = useState(false);
+  const [showColumns, setShowColumns] = useState(false);  // Stage 10
 
-  // Reset impact data when the node changes
+  // Reset impact data and column panel when the node changes
   useEffect(() => {
     setImpactData(null);
     setLoadingImpact(false);
+    setShowColumns(false);
   }, [node]);
 
   if (!node) return null;
@@ -164,6 +167,18 @@ export const NodeSidePanel = ({ node, onClose, onExplore, onViewRuns }) => {
                Explore Downstream
                <ExternalLink size={16} />
              </button>
+             {/* Stage 10: Column Lineage button */}
+             <button
+               onClick={() => setShowColumns(prev => !prev)}
+               className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold transition-colors border ${
+                 showColumns
+                   ? 'bg-cyan-500/30 text-cyan-200 border-cyan-400/40'
+                   : 'bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+               }`}
+             >
+               <Columns size={16} />
+               {showColumns ? 'Hide Column Lineage' : 'Column Lineage'}
+             </button>
            </>
         ) : (
            <button 
@@ -175,6 +190,14 @@ export const NodeSidePanel = ({ node, onClose, onExplore, onViewRuns }) => {
            </button>
         )}
       </div>
+
+      {/* Stage 10: Column Panel — renders on the right side */}
+      {showColumns && isDataset && (
+        <ColumnPanel
+          datasetUri={data.uri}
+          onClose={() => setShowColumns(false)}
+        />
+      )}
 
     </div>
   );

@@ -20,6 +20,10 @@ Default: Jaffle Shop DuckDB pipeline (5 transformation jobs)
          raw_orders ────► stg_orders ──────┤
                                             └──► orders     (final mart)
          raw_payments ──► stg_payments ────┘
+
+Stage 10: column_mappings added to each job.
+  Each entry is (input_dataset_name, input_col, output_dataset_name, output_col).
+  These are injected as OpenLineage columnLineage facets when events are emitted.
 """
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -32,6 +36,7 @@ EVENT_DELAY_SECONDS = 3.0                    # Pause between events so you can w
 # ── Pipeline Job Definitions ──────────────────────────────────────────────────
 # Each job = one transformation step in the pipeline.
 # inputs/outputs = list of (namespace, dataset_name) tuples.
+# column_mappings = list of (input_dataset, input_col, output_dataset, output_col)
 
 PIPELINE_JOBS = [
     {
@@ -43,6 +48,11 @@ PIPELINE_JOBS = [
         "outputs": [
             (NAMESPACE, "stg_customers"),
         ],
+        "column_mappings": [
+            ("raw_customers", "id",         "stg_customers", "customer_id"),
+            ("raw_customers", "first_name", "stg_customers", "first_name"),
+            ("raw_customers", "last_name",  "stg_customers", "last_name"),
+        ],
     },
     {
         "job_name": "stg_orders",
@@ -53,6 +63,12 @@ PIPELINE_JOBS = [
         "outputs": [
             (NAMESPACE, "stg_orders"),
         ],
+        "column_mappings": [
+            ("raw_orders", "id",         "stg_orders", "order_id"),
+            ("raw_orders", "user_id",    "stg_orders", "customer_id"),
+            ("raw_orders", "status",     "stg_orders", "status"),
+            ("raw_orders", "order_date", "stg_orders", "order_date"),
+        ],
     },
     {
         "job_name": "stg_payments",
@@ -62,6 +78,12 @@ PIPELINE_JOBS = [
         ],
         "outputs": [
             (NAMESPACE, "stg_payments"),
+        ],
+        "column_mappings": [
+            ("raw_payments", "id",             "stg_payments", "payment_id"),
+            ("raw_payments", "order_id",       "stg_payments", "order_id"),
+            ("raw_payments", "payment_method", "stg_payments", "payment_method"),
+            ("raw_payments", "amount",         "stg_payments", "amount"),
         ],
     },
     {
@@ -75,6 +97,13 @@ PIPELINE_JOBS = [
         "outputs": [
             (NAMESPACE, "customers"),
         ],
+        "column_mappings": [
+            ("stg_customers", "customer_id",   "customers", "customer_id"),
+            ("stg_customers", "first_name",    "customers", "first_name"),
+            ("stg_customers", "last_name",     "customers", "last_name"),
+            ("stg_orders",    "order_id",      "customers", "first_order"),
+            ("stg_payments",  "amount",        "customers", "lifetime_value"),
+        ],
     },
     {
         "job_name": "orders",
@@ -85,6 +114,13 @@ PIPELINE_JOBS = [
         ],
         "outputs": [
             (NAMESPACE, "orders"),
+        ],
+        "column_mappings": [
+            ("stg_orders",   "order_id",       "orders", "order_id"),
+            ("stg_orders",   "customer_id",    "orders", "customer_id"),
+            ("stg_orders",   "status",         "orders", "status"),
+            ("stg_payments", "amount",         "orders", "amount"),
+            ("stg_payments", "payment_method", "orders", "bank_transfer_amount"),
         ],
     },
 ]

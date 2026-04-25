@@ -93,8 +93,42 @@ def _build_ol_event(job: dict) -> dict:
     """
     Convert a pipeline_plugin job definition into an OpenLineage JSON event.
     This is the exact format that POST /lineage/events expects.
+
+    Stage 10: If the job has a 'column_mappings' key, we inject the
+    OpenLineage columnLineage facet into the output dataset's facets.
+    The facet maps each output column → list of input fields that feed it.
     """
     now = datetime.now(timezone.utc).isoformat()
+
+    # ── Build column lineage facets for each output dataset ────────────────
+    # column_mappings format: (input_dataset_name, input_col, output_dataset_name, output_col)
+    # We group by output_dataset_name first, then output_col.
+    column_facets_by_output: dict[str, dict] = {}   # {output_dataset_name: facet_dict}
+
+    for mapping in job.get("column_mappings", []):
+        in_ds_name, in_col, out_ds_name, out_col = mapping
+
+        if out_ds_name not in column_facets_by_output:
+            column_facets_by_output[out_ds_name] = {"fields": {}}
+
+        if out_col not in column_facets_by_output[out_ds_name]["fields"]:
+            column_facets_by_output[out_ds_name]["fields"][out_col] = {"inputFields": []}
+
+        # Determine namespace for the input dataset (same NAMESPACE as job)
+        column_facets_by_output[out_ds_name]["fields"][out_col]["inputFields"].append({
+            "namespace": NAMESPACE,
+            "name": in_ds_name,
+            "field": in_col,
+        })
+
+    # ── Build output dataset list, injecting facets where available ─────────
+    outputs = []
+    for ns, name in job["outputs"]:
+        facets = {}
+        if name in column_facets_by_output:
+            facets["columnLineage"] = column_facets_by_output[name]
+        outputs.append({"namespace": ns, "name": name, "facets": facets})
+
     return {
         "eventType": "COMPLETE",
         "eventTime": now,
@@ -107,11 +141,9 @@ def _build_ol_event(job: dict) -> dict:
             {"namespace": ns, "name": name, "facets": {}}
             for ns, name in job["inputs"]
         ],
-        "outputs": [
-            {"namespace": ns, "name": name, "facets": {}}
-            for ns, name in job["outputs"]
-        ],
+        "outputs": outputs,
     }
+
 
 
 def _wait_for_port(host: str, port: int, label: str, timeout_seconds=90):

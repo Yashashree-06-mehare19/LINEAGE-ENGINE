@@ -40,3 +40,20 @@ export const propagatePii = async () => {
   const res = await API.post('/lineage/admin/propagate-pii');
   return res.data;
 };
+
+// ── Stage 10: Column-Level Lineage ────────────────────────────────────────────
+
+export const getDatasetColumns = async (datasetUri) => {
+  const res = await API.get(`/lineage/columns/${encodeURIComponent(datasetUri)}`);
+  return res.data;
+};
+
+export const getColumnUpstream = async (columnUri) => {
+  const res = await API.get(`/lineage/column-upstream/${encodeURIComponent(columnUri)}`);
+  return res.data;
+};
+
+export const getColumnImpact = async (columnUri) => {
+  const res = await API.get(`/lineage/column-impact/${encodeURIComponent(columnUri)}`);
+  return res.data;
+};

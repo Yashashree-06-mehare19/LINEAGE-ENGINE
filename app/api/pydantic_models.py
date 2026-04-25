@@ -64,3 +64,40 @@ class ImpactResponse(BaseModel):
     affected_jobs: list[str]
     affected_datasets: list[str]
     impact_score: int
+
+
+# ── Stage 10: Column-Level Lineage ────────────────────────────────────────────
+
+class ColumnModel(BaseModel):
+    """A single column node belonging to a dataset."""
+    uri: str          # e.g. "postgres://raw_orders/cust_id"
+    name: str         # e.g. "cust_id"
+    dataset_uri: str  # parent dataset, e.g. "postgres://raw_orders"
+
+
+class ColumnListResponse(BaseModel):
+    """All columns known for a given dataset."""
+    dataset_uri: str
+    column_count: int
+    columns: list[ColumnModel]
+
+
+class ColumnTraceEntry(BaseModel):
+    """One column in an upstream/downstream trace result."""
+    uri: str
+    name: str
+    dataset_uri: str
+    via_job: str      # the job name on the TRANSFORMS edge
+
+
+class ColumnImpactResponse(BaseModel):
+    """All downstream columns that depend on the given column."""
+    column_uri: str
+    impacted_columns: list[ColumnTraceEntry]
+    impact_score: int  # == len(impacted_columns)
+
+
+class ColumnUpstreamResponse(BaseModel):
+    """All upstream columns that feed into the given column."""
+    column_uri: str
+    upstream_columns: list[ColumnTraceEntry]

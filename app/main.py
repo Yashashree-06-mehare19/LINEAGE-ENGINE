@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.ingestion.router import router as ingestion_router
 from app.api.router import router as query_router
+from app.api.column_router import router as column_router   # Stage 10
 
 app = FastAPI(
     title="Metadata Lineage Engine",
@@ -24,6 +25,7 @@ app.add_middleware(
 
 app.include_router(ingestion_router)
 app.include_router(query_router)
+app.include_router(column_router)     # Stage 10: column-level lineage endpoints
 
 
 @app.on_event("startup")

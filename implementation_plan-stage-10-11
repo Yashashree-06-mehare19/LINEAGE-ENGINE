@@ -1,0 +1,654 @@
+# Stage 10 + Stage 11 Implementation Plan
+> **Rule:** Stage 11 cannot begin until Stage 10 is complete and all tests pass.
+
+---
+
+## Architectural Impact Summary
+
+| Stage | Architecture Change | Risk |
+|---|---|---|
+| Stage 10 | **Additive only** — new Column node, new edges, new endpoints, new UI panel | Low |
+| Stage 11 | **Zero backend change** — pipeline registry lives in Python files + a JSON config read by the frontend | Zero |
+
+The existing `Dataset → Job → Dataset` Neo4j graph is **never modified**. Column lineage sits as a parallel sub-graph. All existing API endpoints keep working identically.
+
+---
+
+---
+
+# Stage 10 — Column-Level Lineage
+
+## Goal
+Zoom in below the Dataset level. Track exactly **which column in an input dataset feeds which column in an output dataset**, through a specific job. Answers: *"If I rename `orders.customer_id`, what downstream columns break?"*
+
+## Background — The OpenLineage Column Lineage Facet
+
+OpenLineage already has a `columnLineage` facet in the output dataset's `facets` object. The structure is:
+
+```json
+{
+  "outputs": [{
+    "namespace": "postgres",
+    "name": "orders",
+    "facets": {
+      "columnLineage": {
+        "fields": {
+          "customer_id": {
+            "inputFields": [
+              { "namespace": "postgres", "name": "raw_orders", "field": "cust_id" }
+            ]
+          },
+          "total_amount": {
+            "inputFields": [
+              { "namespace": "postgres", "name": "raw_payments", "field": "amount" }
+            ]
+          }
+        }
+      }
+    }
+  }]
+}
+```
+
+We already have `facets: dict[str, Any]` on `OLDataset` — the data is already coming in. We just need to extract it.
+
+---
+
+## New Neo4j Graph Schema (additions only)
+
+```
+EXISTING (unchanged):
+(:Dataset)-[:CONSUMES]->(:Job)
+(:Job)-[:PRODUCES]->(:Dataset)
+
+NEW additions:
+(:Column { uri, name, dataset_uri })
+(:Column)-[:COLUMN_OF]->(:Dataset)
+(:Column)-[:TRANSFORMS { via_job, run_id, timestamp }]->(:Column)
+```
+
+### Column Node Properties
+| Property | Type | Example |
+|---|---|---|
+| `uri` | string (unique key) | `"postgres://orders/customer_id"` |
+| `name` | string | `"customer_id"` |
+| `dataset_uri` | string (FK to Dataset) | `"postgres://orders"` |
+
+### Column URI Format
+`{dataset_namespace}://{dataset_name}/{column_name}`
+
+Example: `postgres://raw_orders/cust_id`
+
+### New Constraints to create at startup
+```cypher
+CREATE CONSTRAINT column_uri_unique IF NOT EXISTS
+FOR (c:Column) REQUIRE c.uri IS UNIQUE;
+
+CREATE INDEX column_dataset_index IF NOT EXISTS
+FOR (c:Column) ON (c.dataset_uri);
+```
+
+---
+
+## Files to Modify / Create
+
+### `[MODIFY]` `app/ingestion/pydantic_models.py`
+Add two new nested models to parse the `columnLineage` facet. The existing `OLDataset.facets: dict[str, Any]` already receives this data — we just add typed models to parse it cleanly.
+
+```
+New models to add:
+  - OLInputField        { namespace, name, field }
+  - OLColumnLineageField { inputFields: list[OLInputField] }
+  - OLColumnLineageFacet { fields: dict[str, OLColumnLineageField] }
+```
+
+`OLDataset` gets one optional field:
+```
+column_lineage: Optional[OLColumnLineageFacet] = None
+```
+
+In the `model_validator`, extract `self.facets.get("columnLineage")` and populate `column_lineage`.
+
+### `[MODIFY]` `app/models.py`
+Add one new dataclass. Do NOT modify `LineageEvent`, `DatasetRef`, `JobRef`, or `RunRef`.
+
+```python
+@dataclass
+class ColumnTransform:
+    """Represents a single column-to-column mapping through a job."""
+    input_column_uri: str    # e.g. "postgres://raw_orders/cust_id"
+    output_column_uri: str   # e.g. "postgres://orders/customer_id"
+    input_dataset_uri: str   # parent dataset of input column
+    output_dataset_uri: str  # parent dataset of output column
+    via_job_name: str
+    run_id: str
+    timestamp: str
+```
+
+Add one new field to `LineageEvent` (with default to keep all existing callers working):
+```python
+column_transforms: list[ColumnTransform] = field(default_factory=list)
+```
+
+### `[MODIFY]` `app/ingestion/converter.py`
+In `ol_event_to_lineage_event()`, after building `inputs` and `outputs`, add a new loop:
+
+```
+For each output dataset in event.outputs:
+  If output.column_lineage is not None:
+    For each output_column_name, field_def in column_lineage.fields.items():
+      Build output_column_uri = f"{output.namespace}://{output.name}/{output_column_name}"
+      For each input_field in field_def.inputFields:
+        Build input_column_uri = f"{input_field.namespace}://{input_field.name}/{input_field.field}"
+        Build input_dataset_uri = f"{input_field.namespace}://{input_field.name}"
+        Append ColumnTransform(...) to a list
+
+Set LineageEvent.column_transforms = that list
+```
+
+### `[MODIFY]` `app/storage/graph_writer.py`
+In `write_event()`, after the existing `session.execute_write(_write_graph, event)` call, add:
+
+```python
+if event.column_transforms:
+    with driver.session() as session:
+        session.execute_write(_write_column_transforms, event.column_transforms)
+```
+
+Add a new private function `_write_column_transforms(tx, transforms: list[ColumnTransform])`:
+
+```
+For each transform:
+  1. MERGE (:Column {uri: input_column_uri}) ON CREATE SET name, dataset_uri, created_at
+  2. MERGE (:Column {uri: output_column_uri}) ON CREATE SET name, dataset_uri, created_at
+  3. MERGE input_col-[:COLUMN_OF]->(input_dataset)   [MATCH dataset by dataset_uri]
+  4. MERGE output_col-[:COLUMN_OF]->(output_dataset)
+  5. MERGE input_col-[:TRANSFORMS {via_job: job_name, run_id: ..., timestamp: ...}]->output_col
+```
+
+All 5 operations are separate Cypher queries inside one transaction. Use MERGE for idempotency.
+
+### `[MODIFY]` `app/db_client.py`
+In `apply_neo4j_constraints()`, add the two new constraints:
+```cypher
+CREATE CONSTRAINT column_uri_unique IF NOT EXISTS
+FOR (c:Column) REQUIRE c.uri IS UNIQUE;
+
+CREATE INDEX column_dataset_index IF NOT EXISTS
+FOR (c:Column) ON (c.dataset_uri);
+```
+
+### `[NEW]` `app/api/column_router.py`
+New FastAPI router with prefix `/lineage/columns`, tag `"column-lineage"`. Three endpoints:
+
+#### `GET /lineage/columns/{dataset_uri}`
+Returns all columns belonging to a dataset.
+```
+Cypher: MATCH (c:Column {dataset_uri: $uri}) RETURN c
+Response: { dataset_uri, columns: [{uri, name}] }
+404 if dataset does not exist in Neo4j
+```
+
+#### `GET /lineage/column-upstream/{column_uri}`
+Returns everything upstream of a column (what feeds into it).
+```
+Cypher:
+MATCH path = (start:Column {uri: $uri})<-[:TRANSFORMS*1..10]-(upstream:Column)
+RETURN DISTINCT upstream, relationships(path)
+
+Response: { column_uri, upstream_columns: [{uri, name, dataset_uri, via_job}] }
+404 if column not found
+```
+
+#### `GET /lineage/column-impact/{column_uri}`
+Returns all downstream columns that would break if this column changes.
+```
+Cypher:
+MATCH path = (start:Column {uri: $uri})-[:TRANSFORMS*1..10]->(downstream:Column)
+RETURN DISTINCT downstream, relationships(path)
+
+Response: { column_uri, impacted_columns: [{uri, name, dataset_uri, via_job}], impact_score }
+404 if column not found
+```
+
+### `[MODIFY]` `app/main.py`
+Mount the new router:
+```python
+from app.api.column_router import router as column_router
+app.include_router(column_router)
+```
+
+### `[MODIFY]` `app/api/pydantic_models.py`
+Add three new response models:
+```python
+class ColumnModel(BaseModel):
+    uri: str
+    name: str
+    dataset_uri: str
+
+class ColumnListResponse(BaseModel):
+    dataset_uri: str
+    columns: list[ColumnModel]
+
+class ColumnImpactResponse(BaseModel):
+    column_uri: str
+    impacted_columns: list[dict]  # {uri, name, dataset_uri, via_job}
+    impact_score: int
+```
+
+### `[MODIFY]` `pipeline_plugin.py`
+Add column lineage data to the existing `PIPELINE_JOBS` list. Each job gets an optional `column_mappings` key:
+
+```python
+{
+  "job_name": "stg_customers",
+  "inputs": [(NAMESPACE, "raw_customers")],
+  "outputs": [(NAMESPACE, "stg_customers")],
+  "column_mappings": [
+    # (input_dataset, input_col, output_dataset, output_col)
+    ("raw_customers", "id",         "stg_customers", "customer_id"),
+    ("raw_customers", "first_name", "stg_customers", "first_name"),
+    ("raw_customers", "last_name",  "stg_customers", "last_name"),
+  ]
+}
+```
+
+### `[MODIFY]` `run_live_demo.py` — `_build_ol_event()`
+When building the OL event JSON, if the job has `column_mappings`, inject the `columnLineage` facet into the output dataset:
+
+```python
+if job.get("column_mappings"):
+    # Group mappings by output dataset
+    # Build the OpenLineage columnLineage facet structure
+    # Inject into the output dataset's facets dict
+```
+
+---
+
+## Frontend Changes
+
+### `[NEW]` `frontend/src/components/ColumnPanel.jsx`
+A slide-in panel (similar to `NodeSidePanel.jsx`) that appears when a user **clicks on a Dataset node** and then clicks a **"View Columns"** button.
+
+Layout:
+```
+┌─────────────────────────────────┐
+│  📊 Columns — postgres://orders │
+│  ─────────────────────────────  │
+│  customer_id    [Upstream] [Impact] │
+│  total_amount   [Upstream] [Impact] │
+│  order_date     [Upstream] [Impact] │
+└─────────────────────────────────┘
+```
+
+When user clicks `[Upstream]` on a column → calls `GET /lineage/column-upstream/{uri}` and renders a mini-graph of upstream columns grouped by their parent dataset.
+
+When user clicks `[Impact]` → calls `GET /lineage/column-impact/{uri}` and shows a list of downstream columns with the job name that connects them.
+
+### `[MODIFY]` `frontend/src/api/lineageApi.js`
+Add three new API functions:
+```javascript
+export const getDatasetColumns = async (datasetUri) => { ... }
+export const getColumnUpstream = async (columnUri) => { ... }
+export const getColumnImpact = async (columnUri) => { ... }
+```
+
+### `[MODIFY]` `frontend/src/components/NodeSidePanel.jsx`
+When the selected node is a `Dataset` (not a `Job`), add a **"🔍 Column Lineage"** button at the bottom of the panel. Clicking it opens `ColumnPanel.jsx` with that dataset's URI.
+
+---
+
+## Test Script — `scripts/test_stage10.py`
+
+1. **Wipe DB** (same pattern as test_stage7/8)
+2. **Seed** — POST two events with `columnLineage` facets:
+   - Event 1: `raw_customers` → `stg_customers` with 3 column mappings
+   - Event 2: `stg_customers` → `customers` with 2 column mappings (chaining)
+3. **Tests to assert:**
+   - `GET /lineage/columns/postgres://stg_customers` → returns 3 columns ✅
+   - `GET /lineage/column-upstream/postgres://stg_customers/customer_id` → returns `raw_customers/id` ✅
+   - `GET /lineage/column-impact/postgres://raw_customers/id` → returns `stg_customers/customer_id` AND `customers/id` (2-hop) ✅
+   - Column without mappings → endpoint still returns 200 with empty list ✅
+   - Dataset with no columns → `GET /lineage/columns` returns empty list, NOT 404 ✅
+
+---
+
+## Implementation Order for Stage 10
+
+```
+1. app/models.py              → add ColumnTransform dataclass, extend LineageEvent
+2. app/ingestion/pydantic_models.py → add OL column facet models
+3. app/ingestion/converter.py → extract column transforms from OL events
+4. app/db_client.py           → add column constraints
+5. app/storage/graph_writer.py → write column nodes + TRANSFORMS edges
+6. app/api/pydantic_models.py → add column response models
+7. app/api/column_router.py   → new file, 3 endpoints
+8. app/main.py               → mount column_router
+9. pipeline_plugin.py        → add column_mappings to jobs
+10. run_live_demo.py          → inject columnLineage facet in _build_ol_event()
+11. scripts/test_stage10.py   → write and run — must pass 100%
+12. frontend/src/api/lineageApi.js   → add 3 API functions
+13. frontend/src/components/ColumnPanel.jsx → new component
+14. frontend/src/components/NodeSidePanel.jsx → add "Column Lineage" button
+```
+
+---
+
+---
+
+# Stage 11 — Multi-Pipeline System + UI Config
+
+> **Prerequisite:** Stage 10 must be complete with test_stage10.py passing 100%.
+
+## Goal
+Make the Lineage Engine work with **multiple pipelines** (not just Jaffle Shop). Developers can add a new pipeline by dropping a single file into `pipelines/`. Users can switch the active pipeline from both the **CLI** and the **browser UI**. The frontend also gets a config panel for changing the **API URL** (for connecting to different backend instances).
+
+---
+
+## New Directory Structure
+
+```
+lineage-engine/
+├── pipelines/                    ← NEW directory
+│   ├── __init__.py
+│   ├── jaffle_shop.py            ← moved from pipeline_plugin.py (same format)
+│   ├── ecommerce.py              ← NEW example pipeline
+│   └── financial_etl.py         ← NEW example pipeline
+├── pipeline_registry.py          ← NEW — auto-discovers all pipeline files
+├── pipeline_plugin.py            ← kept as backward-compat shim (imports active pipeline)
+└── run_live_demo.py              ← modified to accept --pipeline flag
+```
+
+---
+
+## Pipeline File Format (Contract)
+
+Every file in `pipelines/` must export these exact names. This is the **pipeline contract**:
+
+```python
+# pipelines/ecommerce.py
+
+PIPELINE_NAME = "ecommerce"
+PIPELINE_DESCRIPTION = "E-commerce order processing pipeline"
+NAMESPACE = "postgres://ecommerce"
+ORCHESTRATOR = "dbt"
+EVENT_DELAY_SECONDS = 2.0
+DEFAULT_SEARCH_URI = f"{NAMESPACE}/final_orders"
+DEFAULT_SEARCH_DIRECTION = "upstream"
+
+PIPELINE_JOBS = [
+    {
+        "job_name": "load_raw_orders",
+        "description": "Load raw orders from S3",
+        "inputs":  [(NAMESPACE, "s3_raw_orders")],
+        "outputs": [(NAMESPACE, "raw_orders")],
+        "column_mappings": [
+            ("s3_raw_orders", "order_id",    "raw_orders", "id"),
+            ("s3_raw_orders", "user_id",     "raw_orders", "customer_id"),
+            ("s3_raw_orders", "order_total", "raw_orders", "total"),
+        ]
+    },
+    # ... more jobs
+]
+```
+
+No other interface required. No base class, no inheritance. Just a Python file with these variables.
+
+---
+
+## `[NEW]` `pipeline_registry.py`
+
+Central registry that auto-discovers all pipeline files. Contains:
+
+```
+PIPELINE_DIR = Path(__file__).parent / "pipelines"
+
+function get_all_pipelines() -> dict[str, module]:
+    Scans PIPELINE_DIR for .py files (excluding __init__.py)
+    Imports each as a module using importlib
+    Returns dict: { pipeline_name: module }
+    E.g: { "jaffle_shop": <module>, "ecommerce": <module> }
+
+function get_pipeline(name: str) -> module:
+    Returns specific pipeline module by PIPELINE_NAME
+    Raises ValueError if not found (with list of available names)
+
+function list_pipeline_names() -> list[str]:
+    Returns sorted list of all available PIPELINE_NAME values
+```
+
+---
+
+## `[MODIFY]` `run_live_demo.py`
+
+Add CLI argument parsing using `argparse`:
+
+```
+python run_live_demo.py                        # uses first/default pipeline
+python run_live_demo.py --pipeline ecommerce   # uses ecommerce.py
+python run_live_demo.py --list-pipelines       # prints available pipelines and exits
+```
+
+Replace the direct `from pipeline_plugin import ...` with:
+```python
+import argparse
+from pipeline_registry import get_pipeline, list_pipeline_names
+
+args = parse_args()
+pipeline = get_pipeline(args.pipeline)  # loads the module
+# Then use: pipeline.PIPELINE_JOBS, pipeline.NAMESPACE, etc.
+```
+
+The `--list-pipelines` flag prints:
+```
+Available pipelines:
+  - jaffle_shop  : Jaffle Shop DuckDB pipeline (5 jobs)
+  - ecommerce    : E-commerce order processing pipeline (4 jobs)
+  - financial_etl: Financial ETL pipeline (6 jobs)
+```
+
+---
+
+## `[NEW]` Backend — `app/api/config_router.py`
+
+A lightweight read-only API that the frontend calls to know what pipelines exist.
+
+```
+GET /config/pipelines
+Response:
+{
+  "pipelines": [
+    { "name": "jaffle_shop", "description": "...", "default_search_uri": "...", "job_count": 5 },
+    { "name": "ecommerce",   "description": "...", "default_search_uri": "...", "job_count": 4 }
+  ]
+}
+```
+
+No pipeline "activation" on the backend — the backend is stateless. Activation is only on the demo runner CLI side.
+
+```
+GET /config/health-extended
+Returns the same as /health but adds:
+{
+  "status": "healthy",
+  "services": { "neo4j": "ok", "postgres": "ok" },
+  "available_pipelines": ["jaffle_shop", "ecommerce", "financial_etl"],
+  "api_version": "1.0.0"
+}
+```
+
+### `[MODIFY]` `app/main.py`
+Mount the new router:
+```python
+from app.api.config_router import router as config_router
+app.include_router(config_router)
+```
+
+---
+
+## `[NEW]` Two Example Pipelines
+
+### `pipelines/ecommerce.py`
+A 4-job e-commerce pipeline:
+```
+s3_raw_orders  → load_raw_orders  → raw_orders  ─┐
+s3_raw_users   → load_raw_users   → raw_users   ─┤→ build_order_mart → final_orders
+s3_raw_products→ load_products    → products    ─┘
+```
+Include column mappings for at least the first two jobs.
+
+### `pipelines/financial_etl.py`
+A 5-job financial pipeline:
+```
+bank_transactions → extract_transactions → stg_transactions ─┐
+fx_rates          → load_fx_rates        → stg_fx_rates     ─┤→ calculate_revenue → revenue_report
+account_master    → load_accounts        → stg_accounts     ─┘
+                                                              → audit_log
+```
+Include column mappings.
+
+---
+
+## Frontend — New Config Page
+
+### `[NEW]` `frontend/src/pages/ConfigView.jsx`
+
+A full page (accessible via sidebar) with two sections:
+
+#### Section 1 — Pipeline Selector
+```
+┌─────────────────────────────────────────────┐
+│  📦 Active Pipeline                          │
+│  ─────────────────────────────────────────  │
+│  ○ jaffle_shop    "Jaffle Shop DuckDB (5j)" │
+│  ● ecommerce      "E-commerce orders (4j)"  │
+│  ○ financial_etl  "Financial ETL (5j)"      │
+│                                             │
+│  [▶ Launch This Pipeline in Dashboard]      │
+└─────────────────────────────────────────────┘
+```
+
+- Calls `GET /config/pipelines` on mount to get the list
+- Stores the active selection in `localStorage` under key `lineage_active_pipeline`
+- "Launch in Dashboard" button navigates to `GraphView` with the pipeline's `default_search_uri` pre-filled
+- The Sidebar shows the active pipeline name as a badge: `Pipeline: ecommerce`
+
+#### Section 2 — API Endpoint Config
+```
+┌─────────────────────────────────────────────┐
+│  🔌 Backend API URL                          │
+│  ─────────────────────────────────────────  │
+│  [ http://localhost:8000             ] [Save]│
+│                                             │
+│  Status: ✅ Connected  (v1.0.0)             │
+│  Neo4j: ok | Postgres: ok                   │
+│                                             │
+│  [Reset to Default]                         │
+└─────────────────────────────────────────────┘
+```
+
+- Stored in `localStorage` under key `lineage_api_url`
+- On "Save", calls `GET {new_url}/health` to verify connection before saving
+- If unreachable: shows error "Cannot reach this API — not saved"
+- `lineageApi.js` reads `localStorage.getItem("lineage_api_url") || "http://localhost:8000"` as its baseURL
+
+### `[MODIFY]` `frontend/src/api/lineageApi.js`
+Change the `axios.create()` call from hardcoded URL to:
+```javascript
+const getBaseUrl = () =>
+  localStorage.getItem("lineage_api_url") || "http://localhost:8000";
+
+// Create instance dynamically per request so localStorage changes take effect
+const API = () => axios.create({ baseURL: getBaseUrl(), timeout: 10000 });
+
+// All functions call API() instead of the module-level API instance
+export const getUpstream = async (datasetUri, depth = 5) => {
+  const res = await API().get(`/lineage/upstream/${encodeURIComponent(datasetUri)}`, ...);
+  ...
+};
+```
+
+### `[MODIFY]` `frontend/src/components/Sidebar.jsx`
+- Add "⚙️ Config" item to the sidebar nav linking to `/config`
+- Show active pipeline badge below the nav items:
+  ```
+  PIPELINE
+  • jaffle_shop
+  ```
+  Read from `localStorage`. Clicking it navigates to Config page.
+
+### `[MODIFY]` `frontend/src/App.jsx`
+Add route:
+```jsx
+<Route path="/config" element={<ConfigView />} />
+```
+
+---
+
+## `pipelines/__init__.py`
+Just a module marker. Contents:
+```python
+# This package contains pipeline definitions for the Lineage Engine.
+# Each .py file in this directory is auto-discovered by pipeline_registry.py.
+```
+
+---
+
+## Test Script — `scripts/test_stage11.py`
+
+1. **Registry tests:**
+   - `list_pipeline_names()` returns at least 3 names ✅
+   - `get_pipeline("jaffle_shop")` loads correctly with all required attributes ✅
+   - `get_pipeline("nonexistent")` raises `ValueError` ✅
+
+2. **Config API tests:**
+   - `GET /config/pipelines` returns list with at least 3 entries ✅
+   - Each entry has `name`, `description`, `job_count` ✅
+   - `GET /config/health-extended` includes `available_pipelines` list ✅
+
+3. **Pipeline simulation test:**
+   - Run `python run_live_demo.py --list-pipelines` → exits 0 and prints names ✅
+   - Invalid: `python run_live_demo.py --pipeline nonexistent` → exits 1 with helpful message ✅
+
+4. **Each pipeline format validation:**
+   - All pipeline files have required attributes: `PIPELINE_NAME`, `PIPELINE_JOBS`, `NAMESPACE`, `DEFAULT_SEARCH_URI`, `DEFAULT_SEARCH_DIRECTION` ✅
+
+---
+
+## Implementation Order for Stage 11
+
+```
+1. pipelines/__init__.py                    → empty module marker
+2. pipelines/jaffle_shop.py                → move content from pipeline_plugin.py
+3. pipeline_plugin.py                      → replace with shim: from pipelines.jaffle_shop import *
+4. pipeline_registry.py                   → auto-discovery logic
+5. run_live_demo.py                        → add argparse, --pipeline, --list-pipelines
+6. pipelines/ecommerce.py                  → new example pipeline
+7. pipelines/financial_etl.py             → new example pipeline
+8. app/api/config_router.py               → /config/pipelines + /config/health-extended
+9. app/main.py                             → mount config_router
+10. scripts/test_stage11.py               → write and run — must pass 100%
+11. frontend/src/api/lineageApi.js         → dynamic baseURL from localStorage
+12. frontend/src/pages/ConfigView.jsx      → new page
+13. frontend/src/components/Sidebar.jsx    → add Config nav + pipeline badge
+14. frontend/src/App.jsx                   → add /config route
+```
+
+---
+
+## Verification Plan
+
+### Stage 10 Done When:
+- [ ] `scripts/test_stage10.py` passes 100%
+- [ ] Posting a `columnLineage` facet via Swagger UI creates Column nodes in Neo4j (verify in Neo4j browser: `MATCH (c:Column) RETURN c LIMIT 10`)
+- [ ] `GET /lineage/columns/{uri}` returns column list
+- [ ] `GET /lineage/column-impact/{uri}` traces 2+ hops
+- [ ] Frontend "Column Lineage" button opens ColumnPanel with real data
+
+### Stage 11 Done When:
+- [ ] `scripts/test_stage11.py` passes 100%
+- [ ] `python run_live_demo.py --list-pipelines` works
+- [ ] `python run_live_demo.py --pipeline ecommerce` runs full demo with ecommerce pipeline
+- [ ] Frontend Config page loads pipelines from `/config/pipelines`
+- [ ] Changing API URL in Config page and clicking Save updates all subsequent API calls
+- [ ] Active pipeline badge shows in sidebar

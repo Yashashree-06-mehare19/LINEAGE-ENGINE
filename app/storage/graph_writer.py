@@ -1,5 +1,5 @@
 # app/storage/graph_writer.py
-from app.models import LineageEvent, DatasetRef, JobRef, RunRef
+from app.models import LineageEvent, DatasetRef, JobRef, RunRef, ColumnTransform
 from app.db_client import get_neo4j_driver, get_postgres_conn
 from datetime import datetime, timezone
 import logging
@@ -35,11 +35,24 @@ def write_event(event: LineageEvent) -> None:
     _write_postgres(event)
     _propagate_pii_tags(event)
 
-    logger.info(
-        f"write_event complete: job={event.job.name} "
-        f"run={event.run.run_id} "
-        f"inputs={len(event.inputs)} outputs={len(event.outputs)}"
-    )
+    # Stage 10: write column-level lineage (separate transaction — column failure
+    # never rolls back the dataset/job graph which is already committed above)
+    if event.column_transforms:
+        driver = get_neo4j_driver()
+        with driver.session() as session:
+            session.execute_write(_write_column_transforms, event.column_transforms)
+        logger.info(
+            f"write_event complete: job={event.job.name} "
+            f"run={event.run.run_id} "
+            f"inputs={len(event.inputs)} outputs={len(event.outputs)} "
+            f"column_transforms={len(event.column_transforms)}"
+        )
+    else:
+        logger.info(
+            f"write_event complete: job={event.job.name} "
+            f"run={event.run.run_id} "
+            f"inputs={len(event.inputs)} outputs={len(event.outputs)}"
+        )
 
 
 # ─────────────────────────────────────────────────────────
@@ -159,6 +172,87 @@ def _create_has_run_edge(tx, job: JobRef, run: RunRef) -> None:
         job_name=job.name,
         run_id=run.run_id,
     )
+
+
+# ─────────────────────────────────────────────────────────
+# STAGE 10: COLUMN-LEVEL LINEAGE WRITES
+# ─────────────────────────────────────────────────────────
+
+def _write_column_transforms(tx, transforms: list[ColumnTransform]) -> None:
+    """
+    For each ColumnTransform:
+      1. MERGE the input Column node
+      2. MERGE the output Column node
+      3. MERGE input_col -[:COLUMN_OF]-> input_dataset
+      4. MERGE output_col -[:COLUMN_OF]-> output_dataset
+      5. MERGE input_col -[:TRANSFORMS {via_job, run_id, timestamp}]-> output_col
+
+    All MERGEs — calling twice with same data creates exactly 1 of each.
+    Datasets must already exist (written by _write_graph before this is called).
+    """
+    for t in transforms:
+        # 1 & 2: upsert both Column nodes
+        tx.run(
+            """
+            MERGE (c:Column {uri: $uri})
+            ON CREATE SET
+                c.name        = $name,
+                c.dataset_uri = $dataset_uri,
+                c.created_at  = $now
+            """,
+            uri=t.input_column_uri,
+            name=t.input_column_name,
+            dataset_uri=t.input_dataset_uri,
+            now=datetime.now(timezone.utc).isoformat(),
+        )
+        tx.run(
+            """
+            MERGE (c:Column {uri: $uri})
+            ON CREATE SET
+                c.name        = $name,
+                c.dataset_uri = $dataset_uri,
+                c.created_at  = $now
+            """,
+            uri=t.output_column_uri,
+            name=t.output_column_name,
+            dataset_uri=t.output_dataset_uri,
+            now=datetime.now(timezone.utc).isoformat(),
+        )
+        # 3 & 4: link each Column to its parent Dataset
+        tx.run(
+            """
+            MATCH (c:Column {uri: $col_uri})
+            MATCH (d:Dataset {uri: $ds_uri})
+            MERGE (c)-[:COLUMN_OF]->(d)
+            """,
+            col_uri=t.input_column_uri,
+            ds_uri=t.input_dataset_uri,
+        )
+        tx.run(
+            """
+            MATCH (c:Column {uri: $col_uri})
+            MATCH (d:Dataset {uri: $ds_uri})
+            MERGE (c)-[:COLUMN_OF]->(d)
+            """,
+            col_uri=t.output_column_uri,
+            ds_uri=t.output_dataset_uri,
+        )
+        # 5: create the TRANSFORMS edge between the two columns
+        tx.run(
+            """
+            MATCH (src:Column {uri: $src_uri})
+            MATCH (dst:Column {uri: $dst_uri})
+            MERGE (src)-[r:TRANSFORMS {via_job: $via_job}]->(dst)
+            ON CREATE SET
+                r.run_id    = $run_id,
+                r.timestamp = $timestamp
+            """,
+            src_uri=t.input_column_uri,
+            dst_uri=t.output_column_uri,
+            via_job=t.via_job_name,
+            run_id=t.run_id,
+            timestamp=t.timestamp,
+        )
 
 
 # ─────────────────────────────────────────────────────────

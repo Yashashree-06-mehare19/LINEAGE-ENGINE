@@ -22,7 +22,11 @@ def get_postgres_conn():
 def apply_neo4j_constraints():
     driver = get_neo4j_driver()
     with driver.session() as session:
+        # Existing constraints (Stages 1-6)
         session.run("CREATE CONSTRAINT job_name_unique IF NOT EXISTS FOR (j:Job) REQUIRE j.name IS UNIQUE")
         session.run("CREATE CONSTRAINT dataset_uri_unique IF NOT EXISTS FOR (d:Dataset) REQUIRE d.uri IS UNIQUE")
         session.run("CREATE CONSTRAINT run_id_unique IF NOT EXISTS FOR (r:Run) REQUIRE r.run_id IS UNIQUE")
         session.run("CREATE INDEX dataset_tags_index IF NOT EXISTS FOR (d:Dataset) ON (d.tags)")
+        # Stage 10: Column-Level Lineage
+        session.run("CREATE CONSTRAINT column_uri_unique IF NOT EXISTS FOR (c:Column) REQUIRE c.uri IS UNIQUE")
+        session.run("CREATE INDEX column_dataset_index IF NOT EXISTS FOR (c:Column) ON (c.dataset_uri)")
