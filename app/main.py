@@ -25,6 +25,16 @@ app.include_router(ingestion_router)
 app.include_router(query_router)
 
 
+@app.on_event("startup")
+def startup_event():
+    from app.db_client import apply_neo4j_constraints
+    try:
+        apply_neo4j_constraints()
+        print("Neo4j constraints and indexes applied successfully.")
+    except Exception as e:
+        print(f"Failed to apply Neo4j constraints (Neo4j might be down/starting): {e}")
+
+
 def _tcp_probe(host: str, port: int, timeout: float = 2.0) -> bool:
     """Check if a TCP port is accepting connections. Fast, non-blocking."""
     try:

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query
-from app.api.pydantic_models import LineageGraphResponse, RunsResponse, NodeModel, EdgeModel, RunRecord, DatasetsResponse, GlobalRunsResponse, DatasetRecord
+from app.api.pydantic_models import LineageGraphResponse, RunsResponse, NodeModel, EdgeModel, RunRecord, DatasetsResponse, GlobalRunsResponse, DatasetRecord, ImpactResponse
 from app.db_client import get_neo4j_driver, get_postgres_conn
 import logging
+from app.storage.graph_writer import propagate_pii_retroactive
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/lineage", tags=["query"])
@@ -131,6 +132,51 @@ def get_downstream(
     )
 
 
+@router.get("/impact/{dataset_id:path}", response_model=ImpactResponse)
+def get_impact(dataset_id: str):
+    """
+    Returns an impact analysis of changing this dataset.
+    Finds all downstream jobs and datasets that depend on it transitively.
+    """
+    driver = get_neo4j_driver()
+    with driver.session() as session:
+        exists = session.run(
+            "MATCH (d:Dataset {uri: $uri}) RETURN d.uri LIMIT 1",
+            uri=dataset_id
+        ).single()
+        if not exists:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {dataset_id}")
+
+        result = session.run(
+            """
+            MATCH path = (start:Dataset {uri: $uri})-[:CONSUMES|PRODUCES*1..20]->(node)
+            WHERE node:Dataset OR node:Job
+            RETURN DISTINCT node
+            """,
+            uri=dataset_id,
+        )
+
+        affected_jobs = []
+        affected_datasets = []
+
+        for record in result:
+            node = record["node"]
+            label = list(node.labels)[0] if node.labels else "Unknown"
+            if label == "Job":
+                affected_jobs.append(node["name"])
+            elif label == "Dataset":
+                affected_datasets.append(node["uri"])
+
+        impact_score = len(affected_jobs) + len(affected_datasets)
+
+    return ImpactResponse(
+        dataset_uri=dataset_id,
+        affected_jobs=affected_jobs,
+        affected_datasets=affected_datasets,
+        impact_score=impact_score
+    )
+
+
 # IMPORTANT: /runs/global MUST be defined BEFORE /runs/{job_id:path}
 # otherwise FastAPI matches the string "global" as a job_id.
 @router.get("/runs/global", response_model=list[dict])
@@ -223,3 +269,16 @@ def get_datasets():
             "MATCH (d:Dataset) RETURN d.uri AS uri, d.namespace AS namespace, d.name AS name LIMIT 1000"
         )
         return [{"uri": r["uri"], "namespace": r["namespace"], "name": r["name"]} for r in result]
+
+
+@router.post("/admin/propagate-pii")
+def trigger_pii_propagation():
+    """
+    Triggers retroactive multi-hop PII propagation.
+    """
+    try:
+        updated_count = propagate_pii_retroactive()
+        return {"status": "success", "datasets_updated": updated_count}
+    except Exception as e:
+        logger.error(f"PII propagation failed: {e}")
+        raise HTTPException(status_code=500, detail="PII propagation failed")

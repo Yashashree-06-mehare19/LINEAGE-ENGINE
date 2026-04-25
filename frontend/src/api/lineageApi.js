@@ -30,3 +30,13 @@ export const getGlobalRuns = async (limit = 100) => {
   const res = await API.get('/lineage/runs/global', { params: { limit } });
   return res.data;
 };
+
+export const getImpact = async (datasetUri) => {
+  const res = await API.get(`/lineage/impact/${datasetUri}`);
+  return res.data;
+};
+
+export const propagatePii = async () => {
+  const res = await API.post('/lineage/admin/propagate-pii');
+  return res.data;
+};

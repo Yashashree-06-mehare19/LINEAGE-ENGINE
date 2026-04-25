@@ -1,0 +1,51 @@
+# Walkthrough: Stage 8 - Multi-Hop Retroactive PII Propagation
+
+As requested, here is a breakdown of what was implemented to upgrade PII (Personally Identifiable Information) propagation across the lineage graph, along with the accompanying UI changes.
+
+## 1. What was the problem?
+
+Previously, our ingestion pipeline (`graph_writer.py`) only propagated PII tags **one hop** forward. 
+If a job read from a PII table and wrote to a Staging table, the Staging table received the PII tag. But if a *second* job read from that Staging table and wrote to a Reporting table, the Reporting table did NOT receive the tag.
+We needed a way to force PII tags to propagate transitively across any depth (N-hops) so that downstream tables are accurately marked as sensitive.
+
+## 2. The Solution & Root Cause Analysis
+
+To solve this, we created a retroactive Cypher query that scans the entire graph for paths originating at a PII node and sets the PII tag on any downstream dataset that doesn't already have it. We then exposed this as an admin endpoint and built a UI button to trigger it.
+
+### The Fix:
+
+#### Change 1: Creating the Backend Logic (`graph_writer.py`)
+In `app/storage/graph_writer.py`, we added the `propagate_pii_retroactive()` function. It executes the following Cypher query:
+```cypher
+MATCH (pii:Dataset)-[:CONSUMES|PRODUCES*1..20]->(downstream:Dataset)
+WHERE 'pii' IN pii.tags AND NOT 'pii' IN downstream.tags
+SET downstream.tags = downstream.tags + ['pii']
+RETURN count(DISTINCT downstream) as updated_count
+```
+This efficiently tags the entire downstream lineage of any sensitive data.
+
+#### Change 2: Exposing the Endpoint (`router.py`)
+In `app/api/router.py`, we added the `POST /lineage/admin/propagate-pii` endpoint so that administrators can trigger this scan manually (or via a scheduled chron job).
+
+#### Change 3: Frontend UI Integration (`Sidebar.jsx`)
+We updated `frontend/src/api/lineageApi.js` to connect to this new endpoint. 
+Then, we updated `frontend/src/components/Sidebar.jsx` (the main left navigation menu). We added a new **Admin Tools** section featuring a prominent red **"Propagate PII Tags"** button.
+
+#### Change 4: Adding Integration Tests (`test_stage8.py`)
+We built `scripts/test_stage8.py` which seeds a 3-hop graph, ensures the final node does not have PII natively, triggers the endpoint, and verifies that the final node correctly inherited the PII tag.
+
+## 3. How we tackled it
+
+1.  **Modified `app/storage/graph_writer.py`**: Added the retroactive Cypher logic.
+2.  **Modified `app/api/router.py`**: Exposed the logic via a POST endpoint.
+3.  **Updated `frontend/src/api/lineageApi.js` & `Sidebar.jsx`**: Built a global Admin button to trigger the propagation and show the user how many datasets were updated.
+4.  **Created `scripts/test_stage8.py`**: Built integration tests to prove it works.
+
+## Next Steps
+
+You now have a powerful governance tool to ensure PII tags are not accidentally dropped in complex pipelines!
+- To test it: Make sure your servers are running (`python run_live_demo.py`).
+- Look at the **Sidebar** on the left side of the screen. You will see a new **Admin Tools** section at the bottom.
+- Click the **Propagate PII Tags** button. It will spin and then tell you exactly how many datasets it successfully tagged.
+
+Whenever you are ready to proceed with the next stage, such as **Stage 9 (Airflow Integration Live Test)**, let me know!

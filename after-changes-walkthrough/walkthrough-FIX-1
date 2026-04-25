@@ -1,0 +1,38 @@
+# Walkthrough: Stage 6 - Neo4j Constraint Automation
+
+As requested, here is a breakdown of what was implemented to automate Neo4j constraints upon startup.
+
+## 1. What was the problem?
+
+Right now, Neo4j constraints (like ensuring job names and dataset URIs are unique) had to be applied manually by developers inside the Neo4j browser at `localhost:7474` during their initial setup. If a new developer cloned the repo and just ran `docker compose up`, the database would lack these constraints, leading to the potential creation of duplicate nodes and broken queries.
+
+## 2. The Solution & Root Cause Analysis
+
+To eliminate manual setup steps, we needed a way to auto-apply constraints and indexes to Neo4j the moment our backend (FastAPI) starts.
+
+### The Fix:
+
+We tackled this by hooking into the lifecycle of our FastAPI application and creating a dedicated function for database initializations.
+
+#### Change 1: Creating the Constraint Script (`db_client.py`)
+In `app/db_client.py`, we created a new function `apply_neo4j_constraints()` that establishes a connection to Neo4j using the existing driver and executes the necessary Cypher commands:
+- Require unique `name` for `Job` nodes.
+- Require unique `uri` for `Dataset` nodes.
+- Require unique `run_id` for `Run` nodes.
+- Create an index on `Dataset` tags to speed up queries.
+
+#### Change 2: Running the Script on Startup (`main.py`)
+In `app/main.py`, we added an `@app.on_event("startup")` handler. This allows FastAPI to execute our `apply_neo4j_constraints()` function the moment the API server boots up. We wrapped this in a `try...except` block so that if Neo4j is still booting up (as sometimes happens with Docker Compose), the API won't crash entirely.
+
+## 3. How we tackled it
+
+1.  **Modified `app/db_client.py`**: Added `apply_neo4j_constraints()` with the required Cypher constraint queries.
+2.  **Modified `app/main.py`**: Imported the function and executed it inside a new `startup_event()` function bound to FastAPI's `@app.on_event("startup")`.
+
+## Next Steps
+
+Now that the foundational database structure is automated and bulletproof:
+1.  If you restart the FastAPI server (or it auto-reloads), you'll see a log message confirming: `"Neo4j constraints and indexes applied successfully."`
+2.  You can verify this by checking the Neo4j browser (`localhost:7474`) and running `SHOW CONSTRAINTS`.
+
+Whenever you are ready to proceed with the next stage, such as **Stage 7 (Impact Analysis Endpoint)**, let me know!

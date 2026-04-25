@@ -237,3 +237,25 @@ def _propagate_pii_tags(event: LineageEvent) -> None:
         f"PII tags propagated to {len(event.outputs)} output dataset(s) "
         f"from job {event.job.name}"
     )
+
+
+def propagate_pii_retroactive() -> int:
+    """
+    Multi-hop retroactive PII propagation.
+    Finds any downstream dataset from a PII dataset and ensures it also has the PII tag.
+    Returns the number of datasets updated.
+    """
+    driver = get_neo4j_driver()
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (pii:Dataset)-[:CONSUMES|PRODUCES*1..20]->(downstream:Dataset)
+            WHERE 'pii' IN pii.tags AND NOT 'pii' IN downstream.tags
+            SET downstream.tags = downstream.tags + ['pii']
+            RETURN count(DISTINCT downstream) as updated_count
+            """
+        )
+        record = result.single()
+        count = record["updated_count"] if record else 0
+        logger.info(f"Retroactive PII propagation updated {count} datasets.")
+        return count
