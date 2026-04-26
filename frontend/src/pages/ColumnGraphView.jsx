@@ -99,7 +99,7 @@ export const ColumnGraphView = () => {
       return;
     }
 
-    const g = new dagre.graphlib.Graph();
+    const g = new dagre.graphlib.Graph({ compound: true });
     g.setGraph({ rankdir: 'LR', align: 'UL', ranker: 'longest-path', nodesep: 30, ranksep: 200 });
     g.setDefaultEdgeLabel(() => ({}));
 

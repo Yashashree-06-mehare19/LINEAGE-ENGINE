@@ -102,7 +102,7 @@ export const GraphView = () => {
 
   const handleSearch   = (uri, depth, direction) => fetchGraph(uri, depth, direction);
   const handleExplore  = (uri, direction)         => fetchGraph(uri, 5, direction);
-  const runDefaultDemo = ()                        => fetchGraph('duckdb://jaffle_shop/raw_customers', 5, 'downstream');
+  const runDefaultDemo = ()                        => fetchGraph('duckdb://jaffle_shop/customers', 5, 'upstream');
 
   return (
     <div className="flex-1 w-full h-full relative flex flex-col">
